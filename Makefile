@@ -7,7 +7,7 @@ all: build
 
 build:
 	@mkdir -p bin/
-	go build -o $(OUTPUT_DIR)/qcow2util cmd/main.go
+	go build -o $(OUTPUT_DIR)/qcow2_util cmd/main.go
 
 fmt:
 	gofmt -w ./qcow2 ./cmd 
