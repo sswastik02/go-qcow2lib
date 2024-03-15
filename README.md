@@ -45,9 +45,9 @@ Qcow2 Utility
 ==============
 ```shell
 make 
-bin/qcow2util create <-f filename> <-s filesize> [-b backingfile] [-d datafile] [--enable-subcluster]
-bin/qcow2util info <-f filename> [--detail] [--pretty] 
-bin/qcow2util dd <-i inputfile> [-f inputformat] <-o outputfile> <-O outputformat> [--l2-cache-size=size]
+bin/qcow2_util create <-f filename> <-s filesize> [-b backingfile] [-d datafile] [--enable-subcluster]
+bin/qcow2_util info <-f filename> [--detail] [--pretty] 
+bin/qcow2_util dd <-i inputfile> [-f inputformat] <-o outputfile> <-O outputformat> [--l2-cache-size=size]
 ```
 
 License 
