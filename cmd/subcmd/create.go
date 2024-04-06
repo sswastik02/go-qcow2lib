@@ -28,11 +28,12 @@ import (
 )
 
 type CreateOptions struct {
-	FilePath    string
-	BackingPath string
-	Size        string
-	SubCluster  bool
-	DataFile    string
+	FilePath          string
+	BackingPath       string
+	Size              string
+	SubCluster        bool
+	DataFile          string
+	BackingFileFormat string
 }
 
 func newCreateCmd() *cobra.Command {
@@ -41,7 +42,7 @@ func newCreateCmd() *cobra.Command {
 	var cmd = &cobra.Command{
 		Use:   "create",
 		Short: "create a qcow2 file",
-		Long:  "qcow2_utils create <-f filename> <-s size> [-b backingfile] [--enable-subcluster]",
+		Long:  "qcow2_utils create <-f filename> <-s size> [-b backingfile] [-F backingFileFormat] [--enable-subcluster]",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.FilePath == "" {
 				cmd.Help()
@@ -53,7 +54,7 @@ func newCreateCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
-			err := createQcow2(opts.FilePath, size, opts.SubCluster, opts.BackingPath, opts.DataFile)
+			err := createQcow2(opts.FilePath, size, opts.SubCluster, opts.BackingPath, opts.BackingFileFormat, opts.DataFile)
 			if err != nil {
 				fmt.Printf("create qcow2 file failed, err:%v\n", err)
 			} else {
@@ -69,10 +70,11 @@ func newCreateCmd() *cobra.Command {
 	flags.BoolVarP(&opts.SubCluster, "enable-subcluster", "", false, "")
 	flags.StringVarP(&opts.BackingPath, "backing", "b", "", "specify the backing file path")
 	flags.StringVarP(&opts.DataFile, "datafile", "d", "", "specify the external data file path")
+	flags.StringVarP(&opts.BackingFileFormat, "backing-file-fmt", "F", "", "specify the backing file format")
 	return cmd
 }
 
-func createQcow2(filename string, size uint64, subcluster bool, backing string, datafile string) error {
+func createQcow2(filename string, size uint64, subcluster bool, backing string, backingFileFmt string, datafile string) error {
 
 	var err error
 	opts := make(map[string]any)
@@ -81,6 +83,7 @@ func createQcow2(filename string, size uint64, subcluster bool, backing string, 
 	opts[qcow2.OPT_FILENAME] = filename
 	opts[qcow2.OPT_SUBCLUSTER] = subcluster
 	opts[qcow2.OPT_BACKING] = backing
+	opts[qcow2.OPT_BACKING_FILE_FMT] = backingFileFmt
 	opts[qcow2.OPT_DATAFILE] = datafile
 
 	if err = qcow2.Blk_Create(filename, opts); err != nil {

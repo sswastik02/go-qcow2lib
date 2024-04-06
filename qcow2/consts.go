@@ -196,13 +196,14 @@ const (
 
 // options
 const (
-	OPT_FMT         = "fmt"
-	OPT_SIZE        = "size"
-	OPT_FILENAME    = "filename"
-	OPT_BACKING     = "backing"
-	OPT_SUBCLUSTER  = "enable-subcluster"
-	OPT_L2CACHESIZE = "l2-cache-size"
-	OPT_DATAFILE    = "datafile"
+	OPT_FMT              = "fmt"
+	OPT_SIZE             = "size"
+	OPT_FILENAME         = "filename"
+	OPT_BACKING          = "backing"
+	OPT_SUBCLUSTER       = "enable-subcluster"
+	OPT_L2CACHESIZE      = "l2-cache-size"
+	OPT_DATAFILE         = "datafile"
+	OPT_BACKING_FILE_FMT = "backingFileFmt"
 )
 
 /* permission constants */
@@ -218,5 +219,8 @@ const (
 const Max_WRITE_ZEROS = uint64(65536)
 const MAX_BOUNCE_BUFFER = uint64(32768 << 9)
 
-//external data file magic number
-const QCOW2_EXT_MAGIC_DATA_FILE = uint32(0x44415441)
+// external data file magic number
+const (
+	QCOW2_EXT_MAGIC_DATA_FILE   = uint32(0x44415441)
+	QCOW2_EXT_MAGIC_BACKING_FMT = uint32(0xe2792aca)
+)

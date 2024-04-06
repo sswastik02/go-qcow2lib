@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"unsafe"
 )
@@ -80,6 +81,7 @@ func qcow2_create(filename string, options map[string]any) error {
 	var child *BdrvChild
 	var enableSc bool
 	var dataFile string
+	var backingFileFmt string
 
 	//check file name
 	if filename == "" {
@@ -106,6 +108,11 @@ func qcow2_create(filename string, options map[string]any) error {
 	//data file
 	if val, ok := options[OPT_DATAFILE]; ok {
 		dataFile = val.(string)
+	}
+
+	//backing file format
+	if val, ok := options[OPT_BACKING_FILE_FMT]; ok {
+		backingFileFmt = val.(string)
 	}
 
 	//now open the child
@@ -183,8 +190,11 @@ func qcow2_create(filename string, options map[string]any) error {
 		return err
 	}
 	//write the data file if any
+	// store the datafile header ext length to use with backing file format header ext
+	dataFileHeaderExtLength := uint64(0)
 	if dataFile != "" {
-		if err = header_ext_add_external_data_file(bs, uint64(unsafe.Sizeof(QCowHeader{})), dataFile); err != nil {
+		dataFileHeaderExtLength, err = header_ext_add_external_data_file(bs, uint64(unsafe.Sizeof(QCowHeader{})), dataFile)
+		if err != nil {
 			return err
 		}
 		var dataChild *BdrvChild
@@ -204,6 +214,10 @@ func qcow2_create(filename string, options map[string]any) error {
 		if _, err := Blk_Pwrite_Object(bs.current, BACKING_FILE_OFFSET,
 			([]byte)(backingFile), uint64(len(backingFile))); err != nil {
 			return err
+		}
+		if backingFileFmt != "" {
+			// write backing file extension
+			header_ext_add_backing_file_format(bs, uint64(unsafe.Sizeof(QCowHeader{}))+dataFileHeaderExtLength, backingFileFmt)
 		}
 	}
 
@@ -861,44 +875,83 @@ func qcow2_pdiscard(bs *BlockDriverState, offset uint64, bytes uint64) error {
 	return qcow2_cluster_discard(bs, offset, bytes, QCOW2_DISCARD_REQUEST, false)
 }
 
-//write the ext header after the qcow2 regular header
-func header_ext_add_external_data_file(bs *BlockDriverState, offset uint64, dataFile string) error {
+// write external datafile ext header at offset
+func header_ext_add_external_data_file(bs *BlockDriverState, offset uint64, dataFile string) (uint64, error) {
+	return header_ext_add(bs, QCOW2_EXT_MAGIC_DATA_FILE, offset, dataFile)
+}
+
+// write backing file format ext header at offset
+func header_ext_add_backing_file_format(bs *BlockDriverState, offset uint64, format string) (uint64, error) {
+	return header_ext_add(bs, QCOW2_EXT_MAGIC_BACKING_FMT, offset, format)
+}
+
+// write the ext header after the qcow2 regular header returns length written to disk
+func header_ext_add(bs *BlockDriverState, magic uint32, offset uint64, data string) (uint64, error) {
 	extHeader := &QCowExtension{
-		Magic:  QCOW2_EXT_MAGIC_DATA_FILE,
-		Length: uint32(len(dataFile)),
+		Magic:  magic,
+		Length: uint32(len(data)),
 	}
 	extLen := uint64(unsafe.Sizeof(*extHeader))
 	//write to the ext header
 	if _, err := Blk_Pwrite_Object(bs.current, offset, extHeader, extLen); err != nil {
-		return err
+		return 0, err
 	}
-	//write the external data
-	if _, err := Blk_Pwrite_Object(bs.current, offset+extLen, ([]byte)(dataFile), uint64(len(dataFile))); err != nil {
-		return err
+	//write the length data
+	if _, err := Blk_Pwrite_Object(bs.current, offset+extLen, ([]byte)(data), uint64(len(data))); err != nil {
+		return extLen, err
 	}
-	return nil
+
+	totalSize := extLen + uint64(len(data))
+	if totalSize%8 == 0 {
+		// No need of padding as size is multiple of 8
+		return totalSize, nil
+	}
+
+	// header extension size must be multiple of 8
+	paddingLength := (8 - totalSize%8) % 8
+	paddingOffset := offset + totalSize
+	paddingBytes := strings.Repeat("\x00", int(paddingLength))
+
+	// write the padding data
+	if _, err := Blk_Pwrite_Object(bs.current, paddingOffset, ([]byte)(paddingBytes), uint64(paddingLength)); err != nil {
+		return totalSize, err
+	}
+
+	return totalSize + paddingLength, nil
 }
 
 func header_ext_read_external_data_file(bs *BlockDriverState, offset uint64) (string, error) {
+	return header_ext_read(bs, offset, QCOW2_EXT_MAGIC_DATA_FILE)
+}
+
+func header_ext_read_backing_file_format(bs *BlockDriverState, offset uint64) (string, error) {
+	return header_ext_read(bs, offset, QCOW2_EXT_MAGIC_BACKING_FMT)
+}
+
+func header_ext_read(bs *BlockDriverState, offset uint64, magic uint32) (string, error) {
+
+	qcow2HeaderExtensionReadError := func(err error) error {
+		return fmt.Errorf("qcow2 header extension read fail, err: %v", err)
+	}
 
 	var extHeader QCowExtension
 	extLen := uint64(unsafe.Sizeof(extHeader))
 	//read the ext header
 	if _, err := Blk_Pread_Object(bs.current, offset, &extHeader, extLen); err != nil {
-		return "", fmt.Errorf("qcow2 external data file read fail, err: %v", err)
+		return "", qcow2HeaderExtensionReadError(err)
 	}
-	if extHeader.Magic != QCOW2_EXT_MAGIC_DATA_FILE || extHeader.Length == 0 {
+	if extHeader.Magic != magic || extHeader.Length == 0 {
 		return "", nil
 	}
 	//read the data file path
-	var dataFile string
+	var data string
 	bytes := make([]byte, extHeader.Length)
 	if _, err := Blk_Pread_Object(bs.current, offset+extLen, bytes, uint64(extHeader.Length)); err != nil {
-		return "", fmt.Errorf("qcow2 external data file read fail, err: %v", err)
+		return "", qcow2HeaderExtensionReadError(err)
 	} else {
-		dataFile = string(bytes)
+		data = string(bytes)
 	}
-	return dataFile, nil
+	return data, nil
 }
 
 func qcow2_pwritev_task_entry(task *Qcow2Task) error {
